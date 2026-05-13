@@ -1,113 +1,125 @@
 <?php
-session_start(); include "../includes/db.php";
-if (!isset($_SESSION["user_id"])) { header("Location: login.php"); exit(); }
-
-$isAdmin = ($_SESSION["user_role"] === "admin");
-$n = htmlspecialchars($_SESSION["user_name"]);
-$v = $_GET["view"] ?? "dashboard";
-$id = (int)($_GET["id"] ?? 0);
-
-if ($_SERVER["REQUEST_METHOD"] === "POST" && $isAdmin) {
-    if ($_POST["action"] === "del") {
-        $conn->query("DELETE FROM users WHERE ID=". (int)$_POST["id"]);
-        $_SESSION["msg"] = "User Deleted Successfully!";
-    } else {
-        $fn=$conn->real_escape_string($_POST["fn"]); $ln=$conn->real_escape_string($_POST["ln"]);
-        $em=$conn->real_escape_string($_POST["em"]); $ge=$_POST["ge"]; $ro=$_POST["ro"];
-        if ($_POST["action"] === "add") {
-            $pw=password_hash($_POST["pw"], PASSWORD_DEFAULT);
-            $conn->query("INSERT INTO users (fname,lname,email,password,gender,role) VALUES ('$fn','$ln','$em','$pw','$ge','$ro')");
-            $_SESSION["msg"] = "User Created Successfully!";
-        } elseif ($_POST["action"] === "edit") {
-            $pw=$_POST["pw"]?", password='".password_hash($_POST["pw"], PASSWORD_DEFAULT)."'":"";
-            $conn->query("UPDATE users SET fname='$fn',lname='$ln',email='$em',gender='$ge',role='$ro'$pw WHERE ID=$id");
-            $_SESSION["msg"] = "User Updated Successfully!";
-        }
-    }
-    header("Location: admin.php?view=".($_POST["action"]==="del"?"list":"list")); exit();
+session_start();
+include "../includes/db.php";
+include "../includes/admin_functions.php";
+if (!isset($_SESSION["user_id"])) {
+    header("Location: login.php");
+    exit();
 }
 
-$msg = $_SESSION["msg"] ?? ""; unset($_SESSION["msg"]);
-$stats = [
-    'total' => $conn->query("SELECT COUNT(*) FROM users")->fetch_row()[0],
-    'admins' => $conn->query("SELECT COUNT(*) FROM users WHERE role='admin'")->fetch_row()[0]
-];
-$users = $conn->query("SELECT * FROM users")->fetch_all(MYSQLI_ASSOC);
-$u = ($v==="edit") ? $conn->query("SELECT * FROM users WHERE ID=$id")->fetch_assoc() : null;
+$isAdmin = $_SESSION["user_role"] === "admin";
+if ($isAdmin && $_SERVER["REQUEST_METHOD"] === "POST") handleAdminPost($conn);
+
+$view = $_GET["view"] ?? "dashboard";
+$message = $_SESSION["msg"] ?? "";
+unset($_SESSION["msg"]);
+$data = getAdminData($conn, $view, (int)($_GET["id"] ?? 0));
 ?>
 <!DOCTYPE html>
-<html>
-<head><title>Admin Panel</title><link rel="stylesheet" href="../styles/main.css"></head>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin</title>
+    <link rel="stylesheet" href="../styles/main_simple.css">
+</head>
+
 <body>
-<?php include "../includes/sidebar.php"; ?>
-<main class="main">
-    <div class="main-header">
-        <h1>Admin Control</h1>
-        <p style="font-size:14px;color:var(--muted);">Logged in as <b style="color:var(--text);"><?= $n ?></b> <span class="chip chip-admin">Admin</span></p>
-    </div>
-
-    <?php if($msg): ?>
-    <div class="toast-container"><div class="toast"><i data-lucide="check-circle"></i> <?= $msg ?></div></div>
-    <script>setTimeout(()=>document.querySelector('.toast-container').remove(), 3000);</script>
-    <?php endif; ?>
-
-    <?php if ($v === "dashboard"): ?>
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon" style="background:#e0f2fe; color:#0369a1;"><i data-lucide="users"></i></div>
-                <div class="stat-info"><h2><?= $stats['total'] ?></h2><p>Total Registered</p></div>
+    <?php include "../includes/sidebar.php"; ?>
+    <main class="main">
+        <div class="main-header">
+            <div>
+                <h1><?= $isAdmin ? 'Admin Dashboard' : 'User Directory' ?></h1>
+                <p>Welcome back, <?= htmlspecialchars($_SESSION["user_name"]) ?> <span class="chip <?= $isAdmin ? 'chip-admin' : 'chip-user' ?>"><?= $isAdmin ? 'Admin' : 'User' ?></span></p>
             </div>
-            <div class="stat-card">
-                <div class="stat-icon" style="background:#dcfce7; color:#15803d;"><i data-lucide="user-check"></i></div>
-                <div class="stat-info"><h2><?= $stats['admins'] ?></h2><p>Admin Accounts</p></div>
-            </div>
+            <?php if ($isAdmin): ?>
+                <a href="admin.php?view=add" class="btn btn-primary">+ Create User</a>
+            <?php endif; ?>
         </div>
-        <div class="card" style="display:flex; justify-content:space-between; align-items:center;">
-            <div><h3>Quick Actions</h3><p style="color:var(--muted); font-size:14px; margin-top:5px;">Manage users and permissions.</p></div>
-            <a href="admin.php?view=add" class="btn btn-primary"><i data-lucide="user-plus"></i> Create User</a>
-        </div>
+        <?php if ($message): ?>
+            <div class="toast"><?= $message ?></div>
+            <script>
+                setTimeout(() => document.querySelector('.toast').remove(), 3000);
+            </script>
+        <?php endif; ?>
 
-    <?php elseif ($v === "list"): ?>
+        <?php if ($isAdmin): ?>
+            <div class="stats-grid">
+                <div class="stat-card" style="flex-direction: column; align-items: flex-start;">
+                    <h2><?= $data['total'] ?></h2>
+                    <p style="margin-bottom: 0;">Total Registered Users</p>
+                </div>
+                <div class="stat-card" style="flex-direction: column; align-items: flex-start;">
+                    <h2><?= $data['admins'] ?></h2>
+                    <p style="margin-bottom: 0;">Total Admins</p>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($isAdmin && ($view === "add" || $view === "edit")): ?>
+            <div style="margin-bottom: 30px;">
+                <?php include "admin_form.php"; ?>
+            </div>
+        <?php elseif ($isAdmin && $view === "view" && $data['edit']): ?>
+            <div class="card" style="margin-bottom: 30px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <h3 style="margin-bottom: 0;">User Details</h3>
+                    <a href="admin.php" class="text-link">Close Details</a>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 24px;">
+                    <div>
+                        <p style="color: #8a8a8a; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Full Name</p>
+                        <p style="font-weight: 500;"><?= htmlspecialchars($data['edit']['fname'] . " " . $data['edit']['lname']) ?></p>
+                    </div>
+                    <div>
+                        <p style="color: #8a8a8a; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Email Address</p>
+                        <p style="font-weight: 500;"><?= htmlspecialchars($data['edit']['email']) ?></p>
+                    </div>
+                    <div>
+                        <p style="color: #8a8a8a; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Gender</p>
+                        <p style="font-weight: 500;"><?= htmlspecialchars($data['edit']['gender']) ?></p>
+                    </div>
+                    <div>
+                        <p style="color: #8a8a8a; font-size: 12px; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;">Account Role</p>
+                        <span class="chip"><?= htmlspecialchars($data['edit']['role']) ?></span>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:25px;">
-                <h3>User Directory</h3>
-                <a href="admin.php?view=add" class="btn btn-primary"><i data-lucide="user-plus"></i> Add New</a>
-            </div>
+            <h3>User Directory</h3>
             <table>
-                <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Role</th><?php if($isAdmin): ?><th>Actions</th><?php endif; ?></tr></thead>
-                <tbody>
-                    <?php foreach($users as $usr): ?>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <?php if ($isAdmin): ?><th>Actions</th><?php endif; ?>
+                </tr>
+                <?php foreach ($data['users'] as $user): ?>
                     <tr>
-                        <td><?= $usr["ID"] ?></td><td><?= $usr["fname"]." ".$usr["lname"] ?></td><td><?= $usr["email"] ?></td>
-                        <td><span class="chip chip-<?= $usr["role"] ?>"><?= $usr["role"] ?></span></td>
-                        <?php if($isAdmin): ?>
-                        <td>
-                            <a href="admin.php?view=edit&id=<?= $usr["ID"] ?>" class="btn" style="padding:8px; background:var(--green-soft); color:var(--green);"><i data-lucide="edit-3"></i></a>
-                            <form method="POST" style="display:inline;"><input type="hidden" name="action" value="del"><input type="hidden" name="id" value="<?= $usr["ID"] ?>"><button type="submit" class="btn" style="padding:8px; background:#fef2f2; color:var(--red);"><i data-lucide="trash-2"></i></button></form>
-                        </td><?php endif; ?>
-                    </tr><?php endforeach; ?>
-                </tbody>
+                        <td><?= $user["ID"] ?></td>
+                        <td><?= htmlspecialchars($user["fname"] . " " . $user["lname"]) ?></td>
+                        <td><?= htmlspecialchars($user["email"]) ?></td>
+                        <td><span class="chip"><?= htmlspecialchars($user["role"]) ?></span></td>
+                        <?php if ($isAdmin): ?>
+                            <td style="display: flex; gap: 8px;">
+                                <a href="admin.php?view=view&id=<?= $user["ID"] ?>" class="btn" title="View">View</a>
+                                <a href="admin.php?view=edit&id=<?= $user["ID"] ?>" class="btn" title="Edit">Edit</a>
+                                <form method="POST" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this user?');">
+                                    <input type="hidden" name="action" value="del">
+                                    <input type="hidden" name="id" value="<?= $user["ID"] ?>">
+                                    <button type="submit" class="btn" title="Delete">Delete</button>
+                                </form>
+                            </td>
+                        <?php endif; ?>
+                    </tr>
+                <?php endforeach; ?>
             </table>
         </div>
+    </main>
+</body>
 
-    <?php elseif ($isAdmin): ?>
-        <div class="card" style="max-width:600px;">
-            <h3 style="margin-bottom:25px;"><?= ucfirst($v) ?> User Account</h3>
-            <form method="POST"><input type="hidden" name="action" value="<?= $v ?>">
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-                    <div><label>First Name</label><input type="text" name="fn" value="<?= $u["fname"]??'' ?>" required></div>
-                    <div><label>Last Name</label><input type="text" name="ln" value="<?= $u["lname"]??'' ?>" required></div>
-                </div>
-                <label>Email</label><input type="email" name="em" value="<?= $u["email"]??'' ?>" required>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-                    <div><label>Gender</label><select name="ge"><option <?=($u["gender"]??'')==="Male"?"selected":""?>>Male</option><option <?=($u["gender"]??'')==="Female"?"selected":""?>>Female</option></select></div>
-                    <div><label>Role</label><select name="ro"><option value="user" <?=($u["role"]??'')==="user"?"selected":""?>>User</option><option value="admin" <?=($u["role"]??'')==="admin"?"selected":""?>>Admin</option></select></div>
-                </div>
-                <label>Password <?= $v==="edit"?"(leave blank to keep)":"" ?></label><input type="password" name="pw" <?= $v==="add"?"required":"" ?>>
-                <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> <?= ucfirst($v) ?> Save</button>
-                <a href="admin.php?view=list" class="btn" style="background:var(--border); color:var(--text); margin-left:10px;">Cancel</a>
-            </form>
-        </div><?php endif; ?>
-</main>
-<script>lucide.createIcons();</script>
-</body></html>
+</html>
